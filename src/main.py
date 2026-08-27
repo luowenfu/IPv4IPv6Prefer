@@ -640,7 +640,7 @@ class App(tk.Tk):
             meta_parts.append(f"::/0  precedence={status.ipv6_global.precedence}")
         self.policy_meta_var.set("    ".join(meta_parts))
         if status.repaired:
-            self.status_var.set("已补全重启后丢失的默认策略")
+            self.status_var.set("已补全丢失的默认策略")
         else:
             self.status_var.set("策略已读取")
 
