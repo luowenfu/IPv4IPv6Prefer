@@ -47,5 +47,6 @@ python src/main.py
 | 设为 IPv4 优先 | 将 `::ffff:0:0/96` 的 precedence 设为 46 |
 | 设为 IPv6 优先 | 将 `::ffff:0:0/96` 恢复为默认 precedence 35 |
 
+- 切换时会写入完整前缀策略表并持久化。若只改一条，Windows 重启后可能丢掉 `::/0` 等默认项。
 - 请用双栈站点做验证（如 `vv.tcptest.cn`、`www.baidu.com`）。不要用 `baidu.com`（无 AAAA，结果恒为 IPv4）。
 - 部分应用需重新建立连接后才会按新策略选址。

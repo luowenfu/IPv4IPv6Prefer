@@ -17,6 +17,20 @@ DEFAULT_IPV4_MAPPED_PREC = 35
 DEFAULT_IPV4_MAPPED_LABEL = 4
 IPV4_PREFER_PREC = 46
 
+# Full Windows 10/11 default table (RFC 6724). Persistent store *replaces*
+# built-in policies, so writing only ::ffff:0:0/96 drops ::/0 after reboot.
+DEFAULT_POLICIES: tuple[tuple[str, int, int], ...] = (
+    ("::1/128", 50, 0),
+    (IPV6_GLOBAL, 40, 1),
+    (IPV4_MAPPED, DEFAULT_IPV4_MAPPED_PREC, DEFAULT_IPV4_MAPPED_LABEL),
+    ("2002::/16", 30, 2),
+    ("2001::/32", 5, 5),
+    ("fc00::/7", 3, 13),
+    ("fec0::/10", 1, 11),
+    ("3ffe::/16", 1, 12),
+    ("::/96", 1, 3),
+)
+
 
 class Preference(Enum):
     IPV4 = "ipv4"
@@ -37,6 +51,7 @@ class PreferenceStatus:
     ipv4_mapped: Optional[PolicyEntry]
     ipv6_global: Optional[PolicyEntry]
     raw: str
+    repaired: bool = False
 
 
 class PolicyError(RuntimeError):
@@ -94,7 +109,7 @@ def _find_prefix(entries: list[PolicyEntry], prefix: str) -> Optional[PolicyEntr
     return None
 
 
-def get_preference() -> PreferenceStatus:
+def _read_preference() -> PreferenceStatus:
     raw = _run_netsh(["interface", "ipv6", "show", "prefixpolicies"])
     entries = parse_prefix_policies(raw)
     ipv4_mapped = _find_prefix(entries, IPV4_MAPPED)
@@ -115,31 +130,65 @@ def get_preference() -> PreferenceStatus:
     )
 
 
-def set_ipv4_prefer() -> None:
-    """Raise IPv4-mapped precedence above default IPv6 global (40)."""
+def _apply_entry(prefix: str, precedence: int, label: int, existing: set[str]) -> None:
+    action = "set" if prefix.lower() in existing else "add"
     _run_netsh(
         [
             "interface",
             "ipv6",
-            "set",
+            action,
             "prefixpolicy",
-            IPV4_MAPPED,
-            str(IPV4_PREFER_PREC),
-            str(DEFAULT_IPV4_MAPPED_LABEL),
+            prefix,
+            str(precedence),
+            str(label),
+            "store=persistent",
         ]
     )
+
+
+def apply_full_table(ipv4_mapped_prec: int) -> None:
+    """Write the complete prefix policy table so it survives reboot."""
+    current = {
+        entry.prefix
+        for entry in parse_prefix_policies(
+            _run_netsh(["interface", "ipv6", "show", "prefixpolicies"])
+        )
+    }
+    for prefix, prec, label in DEFAULT_POLICIES:
+        if prefix == IPV4_MAPPED:
+            prec = ipv4_mapped_prec
+        _apply_entry(prefix, prec, label, current)
+
+
+def get_preference() -> PreferenceStatus:
+    status = _read_preference()
+    if status.ipv4_mapped is not None and status.ipv6_global is not None:
+        return status
+
+    # Reboot dropped built-in rows; rewrite the full table and keep the choice.
+    if status.ipv4_mapped and status.ipv4_mapped.precedence > DEFAULT_IPV4_MAPPED_PREC:
+        prec = IPV4_PREFER_PREC
+    else:
+        prec = DEFAULT_IPV4_MAPPED_PREC
+    try:
+        apply_full_table(prec)
+    except PolicyError:
+        return status
+    repaired = _read_preference()
+    return PreferenceStatus(
+        preference=repaired.preference,
+        ipv4_mapped=repaired.ipv4_mapped,
+        ipv6_global=repaired.ipv6_global,
+        raw=repaired.raw,
+        repaired=True,
+    )
+
+
+def set_ipv4_prefer() -> None:
+    """Raise IPv4-mapped precedence above default IPv6 global (40)."""
+    apply_full_table(IPV4_PREFER_PREC)
 
 
 def set_ipv6_prefer() -> None:
     """Restore default IPv4-mapped precedence (IPv6 preferred)."""
-    _run_netsh(
-        [
-            "interface",
-            "ipv6",
-            "set",
-            "prefixpolicy",
-            IPV4_MAPPED,
-            str(DEFAULT_IPV4_MAPPED_PREC),
-            str(DEFAULT_IPV4_MAPPED_LABEL),
-        ]
-    )
+    apply_full_table(DEFAULT_IPV4_MAPPED_PREC)
