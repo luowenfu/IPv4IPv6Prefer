@@ -7,7 +7,7 @@ Windows 双栈优先级管理工具。通过调整 IPv6 前缀策略表，在 **
 修改策略需要管理员权限，程序启动时会请求 UAC。
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="界面预览" width="480">
+  <img src="assets/preview.png" alt="界面预览" width="480">
 </p>
 
 ## 功能
